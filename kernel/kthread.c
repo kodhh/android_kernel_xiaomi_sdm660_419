@@ -189,9 +189,7 @@ void *kthread_probe_data(struct task_struct *task)
 {
 	struct kthread *kthread = __to_kthread(task);
 	void *data = NULL;
-
-	if (kthread)
-		probe_kernel_read(&data, &kthread->data, sizeof(data));
+	copy_from_kernel_nofault(&data, &kthread->data, sizeof(data));
 	return data;
 }
 
