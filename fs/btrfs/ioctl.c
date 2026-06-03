@@ -783,9 +783,6 @@ static int create_snapshot(struct btrfs_root *root, struct inode *dir,
 	if (!test_bit(BTRFS_ROOT_REF_COWS, &root->state))
 		return -EINVAL;
 
-	if (btrfs_root_refs(&root->root_item) == 0)
-		return -ENOENT;
-
 	pending_snapshot = kzalloc(sizeof(*pending_snapshot), GFP_KERNEL);
 	if (!pending_snapshot)
 		return -ENOMEM;
@@ -2995,7 +2992,7 @@ static int btrfs_ioctl_defrag(struct file *file, void __user *argp)
 {
 	struct inode *inode = file_inode(file);
 	struct btrfs_root *root = BTRFS_I(inode)->root;
-	struct btrfs_ioctl_defrag_range_args range = {0};
+	struct btrfs_ioctl_defrag_range_args *range;
 	int ret;
 
 	ret = mnt_want_write_file(file);
@@ -3027,28 +3024,33 @@ static int btrfs_ioctl_defrag(struct file *file, void __user *argp)
 			goto out;
 		}
 
+		range = kzalloc(sizeof(*range), GFP_KERNEL);
+		if (!range) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
 		if (argp) {
-			if (copy_from_user(&range, argp, sizeof(range))) {
+			if (copy_from_user(range, argp,
+					   sizeof(*range))) {
 				ret = -EFAULT;
-				goto out;
-			}
-			if (range.flags & ~BTRFS_DEFRAG_RANGE_FLAGS_SUPP) {
-				ret = -EOPNOTSUPP;
+				kfree(range);
 				goto out;
 			}
 			/* compression requires us to start the IO */
-			if ((range.flags & BTRFS_DEFRAG_RANGE_COMPRESS)) {
-				range.flags |= BTRFS_DEFRAG_RANGE_START_IO;
-				range.extent_thresh = (u32)-1;
+			if ((range->flags & BTRFS_DEFRAG_RANGE_COMPRESS)) {
+				range->flags |= BTRFS_DEFRAG_RANGE_START_IO;
+				range->extent_thresh = (u32)-1;
 			}
 		} else {
 			/* the rest are all set to zero by kzalloc */
-			range.len = (u64)-1;
+			range->len = (u64)-1;
 		}
 		ret = btrfs_defrag_file(file_inode(file), file,
-					&range, BTRFS_OLDEST_GENERATION, 0);
+					range, BTRFS_OLDEST_GENERATION, 0);
 		if (ret > 0)
 			ret = 0;
+		kfree(range);
 		break;
 	default:
 		ret = -EINVAL;
@@ -5333,11 +5335,6 @@ static long btrfs_ioctl_qgroup_create(struct file *file, void __user *arg)
 	}
 
 	if (!sa->qgroupid) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (sa->create && is_fstree(sa->qgroupid)) {
 		ret = -EINVAL;
 		goto out;
 	}

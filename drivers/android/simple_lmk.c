@@ -28,6 +28,10 @@ static unsigned short slmk_timeout __read_mostly = CONFIG_ANDROID_SIMPLE_LMK_TIM
 module_param(slmk_timeout, short, 0644);
 #define RECLAIM_EXPIRES msecs_to_jiffies(slmk_timeout)
 
+/* Enable/disable LMK at runtime. Default disabled to avoid killing during boot. */
+static bool lmk_enabled __read_mostly = false;
+module_param(lmk_enabled, bool, 0644);
+
 struct victim_info {
 	struct task_struct *tsk;
 	struct mm_struct *mm;
@@ -206,6 +210,10 @@ static void scan_and_kill(void)
 {
 	int i, nr_to_kill, nr_found = 0;
 	unsigned long pages_found;
+
+	/* Don't kill if LMK is disabled */
+	if (unlikely(!READ_ONCE(lmk_enabled)))
+		return;
 
 	/*
 	 * Reset nr_victims so the reaper thread and simple_lmk_mm_freed() are
@@ -460,7 +468,7 @@ void simple_lmk_mm_freed(struct mm_struct *mm)
 static int simple_lmk_vmpressure_cb(struct notifier_block *nb,
 				    unsigned long pressure, void *data)
 {
-	if (pressure == 100) {
+	if (pressure == 100 && READ_ONCE(lmk_enabled)) {
 		atomic_set(&needs_reclaim, 1);
 		smp_mb__after_atomic();
 		if (waitqueue_active(&oom_waitq))
