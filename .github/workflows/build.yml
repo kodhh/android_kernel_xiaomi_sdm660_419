@@ -1,0 +1,54 @@
+name: Build Kernel with Clang
+
+on:
+  push:
+    branches: [ sukisu-ultra-susfs ]
+  pull_request:
+    branches: [ sukisu-ultra-susfs ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CLANG_PATH: /home/runner/prebuilt/clang
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install dependencies and clone Clang
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+        mkdir -p $CLANG_PATH
+
+        git clone --depth=1 --single-branch -b android14-release \
+          https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+          $CLANG_PATH || { echo "CLANG clone failed"; exit 1; }
+
+    - name: Configure Kernel
+      run: |
+        export PATH="$CLANG_PATH/clang-r475365b/bin:$PATH"
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 \
+          vendor/whyred-perf_defconfig O=out
+
+    - name: Build Kernel
+      run: |
+        export PATH="$CLANG_PATH/clang-r475365b/bin:$PATH"
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 \
+          O=out -j$(nproc)
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build
+        path: |
+          out/arch/arm64/boot/Image.gz-dtb
+          out/arch/arm64/boot/dts/qcom/*.dtb
